@@ -23,6 +23,7 @@ PanelWindow {
     property bool specialActive: false
     property bool animateWindows: false
     property var lastPositions: {}
+    property int pendingCycleDirection: 0
 
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
@@ -41,16 +42,26 @@ PanelWindow {
             root.layoutAlgorithm = layout
             root.toggleExpose()
         }
-
         function open(layout: string) {
             root.layoutAlgorithm = layout
             if (root.isActive) return
             root.toggleExpose()
         }
-
+        function cycle(direction: int) {
+            root.cycleFromIpc(direction >= 0 ? 1 : -1)
+        }
         function close() {
             if (!root.isActive) return
             root.toggleExpose()
+        }
+        function select() {
+            if (!root.isActive) return
+            var index = exposeArea.currentIndex
+            root.toggleExpose()
+            Qt.callLater(function() {
+                var item = winRepeater.itemAt(index)
+                if (item && item.activateWindow) item.activateWindow()
+            })
         }
     }
 
@@ -76,6 +87,15 @@ PanelWindow {
 
                 default:
                 return
+            }
+        }
+    }
+    Connections {
+        target: winRepeater
+        function onCountChanged() {
+            if (root.isActive && root.pendingCycleDirection !== 0 && winRepeater.count > 0) {
+                root.cycleSelection(root.pendingCycleDirection)
+                root.pendingCycleDirection = 0
             }
         }
     }
@@ -119,6 +139,7 @@ PanelWindow {
         } else {
             root.animateWindows = false
             root.lastPositions = {}
+            root.pendingCycleDirection = 0
         }
     }
 
@@ -131,6 +152,42 @@ PanelWindow {
             }
         }
     }
+
+    function cycleSelection(delta) {
+        var total = winRepeater.count
+        if (total <= 0) return
+        var start = exposeArea.currentIndex
+        for (var step = 1; step <= total; ++step) {
+            var candidate = (start + delta * step + total) % total
+            var it = winRepeater.itemAt(candidate)
+            if (it && it.visible) {
+                exposeArea.currentIndex = candidate
+                return
+            }
+        }
+    }
+
+    function activateSelection() {
+        var item = winRepeater.itemAt(exposeArea.currentIndex)
+        if (item && item.activateWindow) {
+            item.activateWindow()
+        }
+    }
+
+    function cycleFromIpc(delta) {
+    if (!root.isActive) {
+        if (!root.layoutAlgorithm) root.layoutAlgorithm = root.lastLayoutAlgorithm || "smartgrid"
+        root.pendingCycleDirection = delta
+        root.toggleExpose()
+        // in case geometry/model were already valid, try immediately too
+        if (winRepeater.count > 0) {
+            root.cycleSelection(root.pendingCycleDirection)
+            root.pendingCycleDirection = 0
+        }
+    } else {
+        root.cycleSelection(delta)
+    }
+}
 
     // --- USER INTERFACE ---
     FocusScope {
